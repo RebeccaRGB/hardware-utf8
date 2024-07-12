@@ -17,6 +17,7 @@ module hardware_utf8 (
 	output reg  overlong,    // overlong encoding
 	output reg  nonuni,      // out of Unicode range
 	output wire error,       // (retry | invalid | overlong | (nonuni & chk_range))
+	output wire normal,      // character is none of the below
 	output wire control,     // character is a C0 or C1 control character
 	output wire surrogate,   // character is a surrogate
 	output wire highchar,    // character is a high surrogate or non-BMP
@@ -524,25 +525,20 @@ module hardware_utf8 (
 	assign bout_eof = (rbop >= rbip);
 	assign error = (retry | invalid | overlong | (nonuni & chk_range));
 
-	assign control = (ready & ~error & (
-		(rc < 32'h20) ||
-		(rc >= 32'h7F && rc < 32'hA0)
-	));
-	assign surrogate = (ready & ~error & (
-		(rc >= 32'hD800 && rc < 32'hE000)
-	));
-	assign highchar = (ready & ~error & (
-		(rc >= 32'hD800 && rc < 32'hDC00) ||
-		(rc[31:16] > 0)
-	));
-	assign private = (ready & ~error & (
-		(rc >= 32'hDB80 && rc < 32'hDC00) ||
-		(rc >= 32'hE000 && rc < 32'hF900) ||
-		(rc[31:16] >= 16'h000F && rc[15:0] < 16'hFFFE)
-	));
-	assign nonchar = (ready & ~error & (
-		(rc >= 32'hFDD0 && rc < 32'hFDF0) ||
-		(rc[15:0] >= 16'hFFFE)
-	));
+	wire p_ok = ready & ~(invalid | overlong | (nonuni & chk_range));
+	wire p_ct = (rc < 32'h20) || (rc >= 32'h7F && rc < 32'hA0);
+	wire p_sr = (rc >= 32'hD800 && rc < 32'hE000);
+	wire p_hi = (rc >= 32'hD800 && rc < 32'hDC00) || (rc[31:16] > 0);
+	wire p_pu = (rc >= 32'hDB80 && rc < 32'hDC00) ||
+	            (rc >= 32'hE000 && rc < 32'hF900) ||
+	            (rc[31:16] >= 16'h000F && rc[15:0] < 16'hFFFE);
+	wire p_nc = (rc >= 32'hFDD0 && rc < 32'hFDF0) || (rc[15:0] >= 16'hFFFE);
+
+	assign normal = p_ok & ~(p_ct | p_sr | p_pu | p_nc);
+	assign control = p_ok & p_ct;
+	assign surrogate = p_ok & p_sr;
+	assign highchar = p_ok & p_hi;
+	assign private = p_ok & p_pu;
+	assign nonchar = p_ok & p_nc;
 
 endmodule

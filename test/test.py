@@ -106,16 +106,42 @@ async def test_project(dut):
 
     async def read_bytes(*args):
         await set_input(0) # read mode
-        if len(args):
-            for i in range(len(args)):
-                await clear_input(5) # byte output clock down
-                await set_input(5) # byte output clock up
-                assert get_output(7) == (0 if (i+1 < len(args)) else 1)
-                assert dut.uio_out.value == args[i]
+        for b in args:
+            assert get_output(7) == 0
             await clear_input(5) # byte output clock down
             await set_input(5) # byte output clock up
+            assert dut.uio_out.value == b
         assert get_output(7) == 1
+        await clear_input(5) # byte output clock down
+        await set_input(5) # byte output clock up
         assert dut.uio_out.value == 0
+        assert get_output(7) == 1
+
+    async def write_bytes(*args):
+        await clear_input(0) # write mode
+        for b in args:
+            dut.uio_in.value = b
+            await clear_input(5) # byte input clock down
+            await set_input(5) # byte input clock up
+
+    async def read_cp(cp):
+        await set_input(0) # read mode
+        await clear_input(4) # char output clock down
+        await set_input(4) # char output clock up
+        assert dut.uio_out.value == (cp >> 24) & 0xFF
+        assert get_output(6) == 0
+        await clear_input(4) # char output clock down
+        await set_input(4) # char output clock up
+        assert dut.uio_out.value == (cp >> 16) & 0xFF
+        assert get_output(6) == 0
+        await clear_input(4) # char output clock down
+        await set_input(4) # char output clock up
+        assert dut.uio_out.value == (cp >> 8) & 0xFF
+        assert get_output(6) == 0
+        await clear_input(4) # char output clock down
+        await set_input(4) # char output clock up
+        assert dut.uio_out.value == cp & 0xFF
+        assert get_output(6) == 1
 
     UNDERFLOW = 0x00
     READY     = 0x01
@@ -128,6 +154,10 @@ async def test_project(dut):
     async def want_errs(errs):
         await set_input(1) # error reporting mode
         assert (dut.uo_out.value & 0x3F) == errs
+
+    async def want_retry(retry):
+        await set_input(1) # error reporting mode
+        assert (dut.uo_out.value & RETRY) == (RETRY if retry else 0)
 
     NORMAL    = 0x01
     CONTROL   = 0x02
@@ -566,3 +596,277 @@ async def test_project(dut):
     await test_encode(0xFFFFFFFD, UNDERFLOW, 0, 0xFD) # lone leading byte of 6-byte sequence
     await test_encode(0xFFFFFFFE, READY|INVALID|ERROR, 0, 0xFE) # lone invalid byte
     await test_encode(0xFFFFFFFF, READY|INVALID|ERROR, 0, 0xFF) # lone invalid byte
+
+    # UTF-8 decoding
+
+    global td_pad
+    td_pad = 0
+
+    async def test_decode(cp, errs, props, *args):
+        global td_pad
+        await write_bytes(*args)
+        await want_errs(errs)
+        await want_props(props)
+        await read_cp(cp)
+        await read_reset()
+        await write_bytes(td_pad)
+        if errs or td_pad < 0x80 or td_pad >= 0xC0:
+            await want_errs(errs|RETRY|ERROR)
+            await want_props(props)
+            await read_cp(cp)
+        else:
+            await want_retry(0)
+        await write_reset()
+        td_pad = (td_pad + 0x33) & 0xFF
+
+    # ASCII
+    await test_decode(0x00000000, READY, CONTROL, 0x00)
+    await test_decode(0x00000001, READY, CONTROL, 0x01)
+    await test_decode(0x0000001F, READY, CONTROL, 0x1F)
+    await test_decode(0x00000020, READY, NORMAL, 0x20)
+    await test_decode(0x0000007E, READY, NORMAL, 0x7E)
+    await test_decode(0x0000007F, READY, CONTROL, 0x7F)
+    # 2-byte sequence
+    await test_decode(0x00000080, READY, CONTROL, 0xC2, 0x80)
+    await test_decode(0x0000009F, READY, CONTROL, 0xC2, 0x9F)
+    await test_decode(0x000000A0, READY, NORMAL, 0xC2, 0xA0)
+    await test_decode(0x000000FF, READY, NORMAL, 0xC3, 0xBF)
+    await test_decode(0x00000100, READY, NORMAL, 0xC4, 0x80)
+    await test_decode(0x000007FF, READY, NORMAL, 0xDF, 0xBF)
+    # 3-byte sequence
+    await test_decode(0x00000800, READY, NORMAL, 0xE0, 0xA0, 0x80)
+    await test_decode(0x0000D7FF, READY, NORMAL, 0xED, 0x9F, 0xBF)
+    await test_decode(0x0000D800, READY, SURROGATE|HIGHCHAR, 0xED, 0xA0, 0x80)
+    await test_decode(0x0000DB7F, READY, SURROGATE|HIGHCHAR, 0xED, 0xAD, 0xBF)
+    await test_decode(0x0000DB80, READY, SURROGATE|HIGHCHAR|PRIVATE, 0xED, 0xAE, 0x80)
+    await test_decode(0x0000DBFF, READY, SURROGATE|HIGHCHAR|PRIVATE, 0xED, 0xAF, 0xBF)
+    await test_decode(0x0000DC00, READY, SURROGATE, 0xED, 0xB0, 0x80)
+    await test_decode(0x0000DFFF, READY, SURROGATE, 0xED, 0xBF, 0xBF)
+    await test_decode(0x0000E000, READY, PRIVATE, 0xEE, 0x80, 0x80)
+    await test_decode(0x0000F8FF, READY, PRIVATE, 0xEF, 0xA3, 0xBF)
+    await test_decode(0x0000F900, READY, NORMAL, 0xEF, 0xA4, 0x80)
+    await test_decode(0x0000FDCF, READY, NORMAL, 0xEF, 0xB7, 0x8F)
+    await test_decode(0x0000FDD0, READY, NONCHAR, 0xEF, 0xB7, 0x90)
+    await test_decode(0x0000FDEF, READY, NONCHAR, 0xEF, 0xB7, 0xAF)
+    await test_decode(0x0000FDF0, READY, NORMAL, 0xEF, 0xB7, 0xB0)
+    await test_decode(0x0000FFFD, READY, NORMAL, 0xEF, 0xBF, 0xBD)
+    await test_decode(0x0000FFFE, READY, NONCHAR, 0xEF, 0xBF, 0xBE)
+    await test_decode(0x0000FFFF, READY, NONCHAR, 0xEF, 0xBF, 0xBF)
+    # 4-byte sequence
+    await test_decode(0x00010000, READY, NORMAL|HIGHCHAR, 0xF0, 0x90, 0x80, 0x80)
+    await test_decode(0x0001FFFD, READY, NORMAL|HIGHCHAR, 0xF0, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x0001FFFE, READY, NONCHAR|HIGHCHAR, 0xF0, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x0001FFFF, READY, NONCHAR|HIGHCHAR, 0xF0, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x00020000, READY, NORMAL|HIGHCHAR, 0xF0, 0xA0, 0x80, 0x80)
+    await test_decode(0x0002FFFD, READY, NORMAL|HIGHCHAR, 0xF0, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x0002FFFE, READY, NONCHAR|HIGHCHAR, 0xF0, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x0002FFFF, READY, NONCHAR|HIGHCHAR, 0xF0, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x00030000, READY, NORMAL|HIGHCHAR, 0xF0, 0xB0, 0x80, 0x80)
+    await test_decode(0x0003FFFD, READY, NORMAL|HIGHCHAR, 0xF0, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x0003FFFE, READY, NONCHAR|HIGHCHAR, 0xF0, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x0003FFFF, READY, NONCHAR|HIGHCHAR, 0xF0, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x00040000, READY, NORMAL|HIGHCHAR, 0xF1, 0x80, 0x80, 0x80)
+    await test_decode(0x0004FFFD, READY, NORMAL|HIGHCHAR, 0xF1, 0x8F, 0xBF, 0xBD)
+    await test_decode(0x0004FFFE, READY, NONCHAR|HIGHCHAR, 0xF1, 0x8F, 0xBF, 0xBE)
+    await test_decode(0x0004FFFF, READY, NONCHAR|HIGHCHAR, 0xF1, 0x8F, 0xBF, 0xBF)
+    await test_decode(0x00050000, READY, NORMAL|HIGHCHAR, 0xF1, 0x90, 0x80, 0x80)
+    await test_decode(0x0005FFFD, READY, NORMAL|HIGHCHAR, 0xF1, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x0005FFFE, READY, NONCHAR|HIGHCHAR, 0xF1, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x0005FFFF, READY, NONCHAR|HIGHCHAR, 0xF1, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x00060000, READY, NORMAL|HIGHCHAR, 0xF1, 0xA0, 0x80, 0x80)
+    await test_decode(0x0006FFFD, READY, NORMAL|HIGHCHAR, 0xF1, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x0006FFFE, READY, NONCHAR|HIGHCHAR, 0xF1, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x0006FFFF, READY, NONCHAR|HIGHCHAR, 0xF1, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x00070000, READY, NORMAL|HIGHCHAR, 0xF1, 0xB0, 0x80, 0x80)
+    await test_decode(0x0007FFFD, READY, NORMAL|HIGHCHAR, 0xF1, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x0007FFFE, READY, NONCHAR|HIGHCHAR, 0xF1, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x0007FFFF, READY, NONCHAR|HIGHCHAR, 0xF1, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x00080000, READY, NORMAL|HIGHCHAR, 0xF2, 0x80, 0x80, 0x80)
+    await test_decode(0x0008FFFD, READY, NORMAL|HIGHCHAR, 0xF2, 0x8F, 0xBF, 0xBD)
+    await test_decode(0x0008FFFE, READY, NONCHAR|HIGHCHAR, 0xF2, 0x8F, 0xBF, 0xBE)
+    await test_decode(0x0008FFFF, READY, NONCHAR|HIGHCHAR, 0xF2, 0x8F, 0xBF, 0xBF)
+    await test_decode(0x00090000, READY, NORMAL|HIGHCHAR, 0xF2, 0x90, 0x80, 0x80)
+    await test_decode(0x0009FFFD, READY, NORMAL|HIGHCHAR, 0xF2, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x0009FFFE, READY, NONCHAR|HIGHCHAR, 0xF2, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x0009FFFF, READY, NONCHAR|HIGHCHAR, 0xF2, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x000A0000, READY, NORMAL|HIGHCHAR, 0xF2, 0xA0, 0x80, 0x80)
+    await test_decode(0x000AFFFD, READY, NORMAL|HIGHCHAR, 0xF2, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x000AFFFE, READY, NONCHAR|HIGHCHAR, 0xF2, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x000AFFFF, READY, NONCHAR|HIGHCHAR, 0xF2, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x000B0000, READY, NORMAL|HIGHCHAR, 0xF2, 0xB0, 0x80, 0x80)
+    await test_decode(0x000BFFFD, READY, NORMAL|HIGHCHAR, 0xF2, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x000BFFFE, READY, NONCHAR|HIGHCHAR, 0xF2, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x000BFFFF, READY, NONCHAR|HIGHCHAR, 0xF2, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x000C0000, READY, NORMAL|HIGHCHAR, 0xF3, 0x80, 0x80, 0x80)
+    await test_decode(0x000CFFFD, READY, NORMAL|HIGHCHAR, 0xF3, 0x8F, 0xBF, 0xBD)
+    await test_decode(0x000CFFFE, READY, NONCHAR|HIGHCHAR, 0xF3, 0x8F, 0xBF, 0xBE)
+    await test_decode(0x000CFFFF, READY, NONCHAR|HIGHCHAR, 0xF3, 0x8F, 0xBF, 0xBF)
+    await test_decode(0x000D0000, READY, NORMAL|HIGHCHAR, 0xF3, 0x90, 0x80, 0x80)
+    await test_decode(0x000DFFFD, READY, NORMAL|HIGHCHAR, 0xF3, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x000DFFFE, READY, NONCHAR|HIGHCHAR, 0xF3, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x000DFFFF, READY, NONCHAR|HIGHCHAR, 0xF3, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x000E0000, READY, NORMAL|HIGHCHAR, 0xF3, 0xA0, 0x80, 0x80)
+    await test_decode(0x000EFFFD, READY, NORMAL|HIGHCHAR, 0xF3, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x000EFFFE, READY, NONCHAR|HIGHCHAR, 0xF3, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x000EFFFF, READY, NONCHAR|HIGHCHAR, 0xF3, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x000F0000, READY, PRIVATE|HIGHCHAR, 0xF3, 0xB0, 0x80, 0x80)
+    await test_decode(0x000FFFFD, READY, PRIVATE|HIGHCHAR, 0xF3, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x000FFFFE, READY, NONCHAR|HIGHCHAR, 0xF3, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x000FFFFF, READY, NONCHAR|HIGHCHAR, 0xF3, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x00100000, READY, PRIVATE|HIGHCHAR, 0xF4, 0x80, 0x80, 0x80)
+    await test_decode(0x0010FFFD, READY, PRIVATE|HIGHCHAR, 0xF4, 0x8F, 0xBF, 0xBD)
+    await test_decode(0x0010FFFE, READY, NONCHAR|HIGHCHAR, 0xF4, 0x8F, 0xBF, 0xBE)
+    await test_decode(0x0010FFFF, READY, NONCHAR|HIGHCHAR, 0xF4, 0x8F, 0xBF, 0xBF)
+    # 4-byte sequence outside of Unicode range
+    await test_decode(0x00110000, READY|NONUNI|ERROR, 0, 0xF4, 0x90, 0x80, 0x80)
+    await test_decode(0x0011FFFD, READY|NONUNI|ERROR, 0, 0xF4, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x0011FFFE, READY|NONUNI|ERROR, 0, 0xF4, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x0011FFFF, READY|NONUNI|ERROR, 0, 0xF4, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x00120000, READY|NONUNI|ERROR, 0, 0xF4, 0xA0, 0x80, 0x80)
+    await test_decode(0x0012FFFD, READY|NONUNI|ERROR, 0, 0xF4, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x0012FFFE, READY|NONUNI|ERROR, 0, 0xF4, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x0012FFFF, READY|NONUNI|ERROR, 0, 0xF4, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x00130000, READY|NONUNI|ERROR, 0, 0xF4, 0xB0, 0x80, 0x80)
+    await test_decode(0x0013FFFD, READY|NONUNI|ERROR, 0, 0xF4, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x0013FFFE, READY|NONUNI|ERROR, 0, 0xF4, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x0013FFFF, READY|NONUNI|ERROR, 0, 0xF4, 0xBF, 0xBF, 0xBF)
+    await clear_input(2) # disable range check to allow values 0x110000 and beyond
+    await test_decode(0x00110000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF4, 0x90, 0x80, 0x80)
+    await test_decode(0x0011FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF4, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x0011FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF4, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x0011FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF4, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x00120000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF4, 0xA0, 0x80, 0x80)
+    await test_decode(0x0012FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF4, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x0012FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF4, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x0012FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF4, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x00130000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF4, 0xB0, 0x80, 0x80)
+    await test_decode(0x0013FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF4, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x0013FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF4, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x0013FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF4, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x00140000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0x80, 0x80, 0x80)
+    await test_decode(0x0014FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0x8F, 0xBF, 0xBD)
+    await test_decode(0x0014FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0x8F, 0xBF, 0xBE)
+    await test_decode(0x0014FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0x8F, 0xBF, 0xBF)
+    await test_decode(0x00150000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0x90, 0x80, 0x80)
+    await test_decode(0x0015FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x0015FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x0015FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x00160000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0xA0, 0x80, 0x80)
+    await test_decode(0x0016FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x0016FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x0016FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x00170000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0xB0, 0x80, 0x80)
+    await test_decode(0x0017FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF5, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x0017FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x0017FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF5, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x00180000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0x80, 0x80, 0x80)
+    await test_decode(0x0018FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0x8F, 0xBF, 0xBD)
+    await test_decode(0x0018FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0x8F, 0xBF, 0xBE)
+    await test_decode(0x0018FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0x8F, 0xBF, 0xBF)
+    await test_decode(0x00190000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0x90, 0x80, 0x80)
+    await test_decode(0x0019FFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x0019FFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x0019FFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x001A0000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0xA0, 0x80, 0x80)
+    await test_decode(0x001AFFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x001AFFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x001AFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x001B0000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0xB0, 0x80, 0x80)
+    await test_decode(0x001BFFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF6, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x001BFFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x001BFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF6, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x001C0000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0x80, 0x80, 0x80)
+    await test_decode(0x001CFFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0x8F, 0xBF, 0xBD)
+    await test_decode(0x001CFFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0x8F, 0xBF, 0xBE)
+    await test_decode(0x001CFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0x8F, 0xBF, 0xBF)
+    await test_decode(0x001D0000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0x90, 0x80, 0x80)
+    await test_decode(0x001DFFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0x9F, 0xBF, 0xBD)
+    await test_decode(0x001DFFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0x9F, 0xBF, 0xBE)
+    await test_decode(0x001DFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0x9F, 0xBF, 0xBF)
+    await test_decode(0x001E0000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0xA0, 0x80, 0x80)
+    await test_decode(0x001EFFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0xAF, 0xBF, 0xBD)
+    await test_decode(0x001EFFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0xAF, 0xBF, 0xBE)
+    await test_decode(0x001EFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0xAF, 0xBF, 0xBF)
+    await test_decode(0x001F0000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0xB0, 0x80, 0x80)
+    await test_decode(0x001FFFFD, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF7, 0xBF, 0xBF, 0xBD)
+    await test_decode(0x001FFFFE, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0xBF, 0xBF, 0xBE)
+    await test_decode(0x001FFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xF7, 0xBF, 0xBF, 0xBF)
+    await test_decode(0x00200000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xF8, 0x88, 0x80, 0x80, 0x80) # 5-byte sequence
+    await test_decode(0x03FFFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xFB, 0xBF, 0xBF, 0xBF, 0xBF) # 5-byte sequence
+    await test_decode(0x04000000, READY|NONUNI, PRIVATE|HIGHCHAR, 0xFC, 0x84, 0x80, 0x80, 0x80, 0x80) # 6-byte sequence
+    await test_decode(0x7FFFFFFF, READY|NONUNI, NONCHAR|HIGHCHAR, 0xFD, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF) # 6-byte sequence
+    await test_decode(0xF0000000, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x80, 0x80) # 6-byte overlong encoding of 1-byte sequence
+    await test_decode(0xF000007F, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x81, 0xBF) # 6-byte overlong encoding of 1-byte sequence
+    await test_decode(0xF0000080, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x82, 0x80) # 6-byte overlong encoding of 2-byte sequence
+    await test_decode(0xF00007FF, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x9F, 0xBF) # 6-byte overlong encoding of 2-byte sequence
+    await test_decode(0xF0000800, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0xA0, 0x80) # 6-byte overlong encoding of 3-byte sequence
+    await test_decode(0xF000FFFF, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x8F, 0xBF, 0xBF) # 6-byte overlong encoding of 3-byte sequence
+    await set_input(2) # reënable range check
+    await test_decode(0x00200000, READY|NONUNI|ERROR, 0, 0xF8, 0x88, 0x80, 0x80, 0x80) # 5-byte sequence
+    await test_decode(0x03FFFFFF, READY|NONUNI|ERROR, 0, 0xFB, 0xBF, 0xBF, 0xBF, 0xBF) # 5-byte sequence
+    await test_decode(0x04000000, READY|NONUNI|ERROR, 0, 0xFC, 0x84, 0x80, 0x80, 0x80, 0x80) # 6-byte sequence
+    await test_decode(0x7FFFFFFF, READY|NONUNI|ERROR, 0, 0xFD, 0xBF, 0xBF, 0xBF, 0xBF, 0xBF) # 6-byte sequence
+    await test_decode(0xF0000000, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x80, 0x80) # 6-byte overlong encoding of 1-byte sequence
+    await test_decode(0xF000007F, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x81, 0xBF) # 6-byte overlong encoding of 1-byte sequence
+    await test_decode(0xF0000080, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x82, 0x80) # 6-byte overlong encoding of 2-byte sequence
+    await test_decode(0xF00007FF, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0x9F, 0xBF) # 6-byte overlong encoding of 2-byte sequence
+    await test_decode(0xF0000800, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x80, 0xA0, 0x80) # 6-byte overlong encoding of 3-byte sequence
+    await test_decode(0xF000FFFF, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x8F, 0xBF, 0xBF) # 6-byte overlong encoding of 3-byte sequence
+    await test_decode(0xF0010000, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x80, 0x90, 0x80, 0x80) # 6-byte overlong encoding of 4-byte sequence
+    await test_decode(0xF01FFFFF, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x87, 0xBF, 0xBF, 0xBF) # 6-byte overlong encoding of 4-byte sequence
+    await test_decode(0xF0200000, READY|OVERLONG|ERROR, 0, 0xFC, 0x80, 0x88, 0x80, 0x80, 0x80) # 6-byte overlong encoding of 5-byte sequence
+    await test_decode(0xF3FFFFFF, READY|OVERLONG|ERROR, 0, 0xFC, 0x83, 0xBF, 0xBF, 0xBF, 0xBF) # 6-byte overlong encoding of 5-byte sequence
+    await test_decode(0xF8000000, READY|OVERLONG|ERROR, 0, 0xF8, 0x80, 0x80, 0x80, 0x80) # 5-byte overlong encoding of 1-byte sequence
+    await test_decode(0xF800007F, READY|OVERLONG|ERROR, 0, 0xF8, 0x80, 0x80, 0x81, 0xBF) # 5-byte overlong encoding of 1-byte sequence
+    await test_decode(0xF8000080, READY|OVERLONG|ERROR, 0, 0xF8, 0x80, 0x80, 0x82, 0x80) # 5-byte overlong encoding of 2-byte sequence
+    await test_decode(0xF80007FF, READY|OVERLONG|ERROR, 0, 0xF8, 0x80, 0x80, 0x9F, 0xBF) # 5-byte overlong encoding of 2-byte sequence
+    await test_decode(0xF8000800, READY|OVERLONG|ERROR, 0, 0xF8, 0x80, 0x80, 0xA0, 0x80) # 5-byte overlong encoding of 3-byte sequence
+    await test_decode(0xF800FFFF, READY|OVERLONG|ERROR, 0, 0xF8, 0x80, 0x8F, 0xBF, 0xBF) # 5-byte overlong encoding of 3-byte sequence
+    await test_decode(0xF8010000, READY|OVERLONG|ERROR, 0, 0xF8, 0x80, 0x90, 0x80, 0x80) # 5-byte overlong encoding of 4-byte sequence
+    await test_decode(0xF81FFFFF, READY|OVERLONG|ERROR, 0, 0xF8, 0x87, 0xBF, 0xBF, 0xBF) # 5-byte overlong encoding of 4-byte sequence
+    await test_decode(0xFC000000, UNDERFLOW, 0, 0xFC, 0x80, 0x80, 0x80, 0x80) # 5-byte truncation of 6-byte sequence
+    await test_decode(0xFDFFFFFF, UNDERFLOW, 0, 0xFD, 0xBF, 0xBF, 0xBF, 0xBF) # 5-byte truncation of 6-byte sequence
+    await test_decode(0xFFC00000, READY|OVERLONG|ERROR, 0, 0xF0, 0x80, 0x80, 0x80) # 4-byte overlong encoding of 1-byte sequence
+    await test_decode(0xFFC0007F, READY|OVERLONG|ERROR, 0, 0xF0, 0x80, 0x81, 0xBF) # 4-byte overlong encoding of 1-byte sequence
+    await test_decode(0xFFC00080, READY|OVERLONG|ERROR, 0, 0xF0, 0x80, 0x82, 0x80) # 4-byte overlong encoding of 2-byte sequence
+    await test_decode(0xFFC007FF, READY|OVERLONG|ERROR, 0, 0xF0, 0x80, 0x9F, 0xBF) # 4-byte overlong encoding of 2-byte sequence
+    await test_decode(0xFFC00800, READY|OVERLONG|ERROR, 0, 0xF0, 0x80, 0xA0, 0x80) # 4-byte overlong encoding of 3-byte sequence
+    await test_decode(0xFFC0FFFF, READY|OVERLONG|ERROR, 0, 0xF0, 0x8F, 0xBF, 0xBF) # 4-byte overlong encoding of 3-byte sequence
+    await test_decode(0xFFE00000, UNDERFLOW, 0, 0xF8, 0x80, 0x80, 0x80) # 4-byte truncation of 5-byte sequence
+    await test_decode(0xFFEFFFFF, UNDERFLOW, 0, 0xFB, 0xBF, 0xBF, 0xBF) # 4-byte truncation of 5-byte sequence
+    await test_decode(0xFFF00000, UNDERFLOW, 0, 0xFC, 0x80, 0x80, 0x80) # 4-byte truncation of 6-byte sequence
+    await test_decode(0xFFF7FFFF, UNDERFLOW, 0, 0xFD, 0xBF, 0xBF, 0xBF) # 4-byte truncation of 6-byte sequence
+    await test_decode(0xFFFE0000, READY|OVERLONG|ERROR, 0, 0xE0, 0x80, 0x80) # 3-byte overlong encoding of 1-byte sequence
+    await test_decode(0xFFFE007F, READY|OVERLONG|ERROR, 0, 0xE0, 0x81, 0xBF) # 3-byte overlong encoding of 1-byte sequence
+    await test_decode(0xFFFE0080, READY|OVERLONG|ERROR, 0, 0xE0, 0x82, 0x80) # 3-byte overlong encoding of 2-byte sequence
+    await test_decode(0xFFFE07FF, READY|OVERLONG|ERROR, 0, 0xE0, 0x9F, 0xBF) # 3-byte overlong encoding of 2-byte sequence
+    await test_decode(0xFFFF0000, UNDERFLOW, 0, 0xF0, 0x80, 0x80) # 3-byte truncation of 4-byte sequence
+    await test_decode(0xFFFF7FFF, UNDERFLOW, 0, 0xF7, 0xBF, 0xBF) # 3-byte truncation of 4-byte sequence
+    await test_decode(0xFFFF8000, UNDERFLOW, 0, 0xF8, 0x80, 0x80) # 3-byte truncation of 5-byte sequence
+    await test_decode(0xFFFFBFFF, UNDERFLOW, 0, 0xFB, 0xBF, 0xBF) # 3-byte truncation of 5-byte sequence
+    await test_decode(0xFFFFC000, UNDERFLOW, 0, 0xFC, 0x80, 0x80) # 3-byte truncation of 6-byte sequence
+    await test_decode(0xFFFFDFFF, UNDERFLOW, 0, 0xFD, 0xBF, 0xBF) # 3-byte truncation of 6-byte sequence
+    await test_decode(0xFFFFF000, READY|OVERLONG|ERROR, 0, 0xC0, 0x80) # 2-byte overlong encoding of 1-byte sequence
+    await test_decode(0xFFFFF07F, READY|OVERLONG|ERROR, 0, 0xC1, 0xBF) # 2-byte overlong encoding of 1-byte sequence
+    await test_decode(0xFFFFF800, UNDERFLOW, 0, 0xE0, 0x80) # 2-byte truncation of 3-byte sequence
+    await test_decode(0xFFFFFBFF, UNDERFLOW, 0, 0xEF, 0xBF) # 2-byte truncation of 3-byte sequence
+    await test_decode(0xFFFFFC00, UNDERFLOW, 0, 0xF0, 0x80) # 2-byte truncation of 4-byte sequence
+    await test_decode(0xFFFFFDFF, UNDERFLOW, 0, 0xF7, 0xBF) # 2-byte truncation of 4-byte sequence
+    await test_decode(0xFFFFFE00, UNDERFLOW, 0, 0xF8, 0x80) # 2-byte truncation of 5-byte sequence
+    await test_decode(0xFFFFFEFF, UNDERFLOW, 0, 0xFB, 0xBF) # 2-byte truncation of 5-byte sequence
+    await test_decode(0xFFFFFF00, UNDERFLOW, 0, 0xFC, 0x80) # 2-byte truncation of 6-byte sequence
+    await test_decode(0xFFFFFF7F, UNDERFLOW, 0, 0xFD, 0xBF) # 2-byte truncation of 6-byte sequence
+    await test_decode(0xFFFFFF80, READY|INVALID|ERROR, 0, 0x80) # lone trailing byte
+    await test_decode(0xFFFFFFBF, READY|INVALID|ERROR, 0, 0xBF) # lone trailing byte
+    await test_decode(0xFFFFFFC0, UNDERFLOW, 0, 0xC0) # lone leading byte of 2-byte sequence
+    await test_decode(0xFFFFFFDF, UNDERFLOW, 0, 0xDF) # lone leading byte of 2-byte sequence
+    await test_decode(0xFFFFFFE0, UNDERFLOW, 0, 0xE0) # lone leading byte of 3-byte sequence
+    await test_decode(0xFFFFFFEF, UNDERFLOW, 0, 0xEF) # lone leading byte of 3-byte sequence
+    await test_decode(0xFFFFFFF0, UNDERFLOW, 0, 0xF0) # lone leading byte of 4-byte sequence
+    await test_decode(0xFFFFFFF7, UNDERFLOW, 0, 0xF7) # lone leading byte of 4-byte sequence
+    await test_decode(0xFFFFFFF8, UNDERFLOW, 0, 0xF8) # lone leading byte of 5-byte sequence
+    await test_decode(0xFFFFFFFB, UNDERFLOW, 0, 0xFB) # lone leading byte of 5-byte sequence
+    await test_decode(0xFFFFFFFC, UNDERFLOW, 0, 0xFC) # lone leading byte of 6-byte sequence
+    await test_decode(0xFFFFFFFD, UNDERFLOW, 0, 0xFD) # lone leading byte of 6-byte sequence
+    await test_decode(0xFFFFFFFE, READY|INVALID|ERROR, 0, 0xFE) # lone invalid byte
+    await test_decode(0xFFFFFFFF, READY|INVALID|ERROR, 0, 0xFF) # lone invalid byte
