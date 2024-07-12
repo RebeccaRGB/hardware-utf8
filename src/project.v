@@ -30,14 +30,14 @@ module tt_um_rebeccargb_hardware_utf8 (
   wire bin       = (read ? 1 : ui_in[5]);
   wire bout      = (read ? ui_in[5] : 1);
   wire rst_out   = ui_in[6];
-  wire rst_in    = ui_in[7];
+  wire rst_in    = ui_in[7] & rst_n;
 
   // outputs
   wire cin_eof, cout_eof;
   wire bin_eof, bout_eof;
   wire ready, retry, invalid, overlong, nonuni, error;
   wire control, surrogate, highchar, private, nonchar;
-  wire normal = ready & ~(error | control | surrogate | highchar | private | nonchar);
+  wire normal = ready & ~(error | control | surrogate | private | nonchar);
 
   assign uo_out[0] = (errs ? ready    : normal   );
   assign uo_out[1] = (errs ? retry    : control  );
