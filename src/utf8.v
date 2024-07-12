@@ -533,7 +533,9 @@ module hardware_utf8 (
 		if (rbop < 6) rbop <= rbop + 1;
 	end endtask
 
-	always @(negedge rst_in or negedge rst_out or negedge cin or negedge bin or negedge cout or negedge bout) begin
+	wire something_dumb = rst_in & rst_out & cin & bin & cout & bout;
+
+	always @(negedge something_dumb) begin
 		if (~rst_in) reset_all;
 		else if (~rst_out) reset_read;
 		else if (~cin) write_rc_encode_utf8;
