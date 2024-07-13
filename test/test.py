@@ -173,31 +173,31 @@ async def test_project(dut):
     # register I/O
 
     # write to byte buffer
-    await write_byte(11, 0)
-    await write_byte(22, 0)
-    await write_byte(33, 0)
-    await write_byte(44, 0)
-    await write_byte(55, 0)
-    await write_byte(66, 1)
-    await write_byte(77, 1)
+    await write_byte(0xFD, 0)
+    await write_byte(0xBE, 0)
+    await write_byte(0xAC, 0)
+    await write_byte(0x97, 0)
+    await write_byte(0x86, 0)
+    await write_byte(0xB5, 1)
+    await write_byte(0xA4, 1)
 
     # read from byte buffer
-    await read_byte(11, 0)
-    await read_byte(22, 0)
-    await read_byte(33, 0)
-    await read_byte(44, 0)
-    await read_byte(55, 0)
-    await read_byte(66, 1)
+    await read_byte(0xFD, 0)
+    await read_byte(0xBE, 0)
+    await read_byte(0xAC, 0)
+    await read_byte(0x97, 0)
+    await read_byte(0x86, 0)
+    await read_byte(0xB5, 1)
     await read_byte(0, 1)
 
     # read from byte buffer again
     await read_reset()
-    await read_byte(11, 0)
-    await read_byte(22, 0)
-    await read_byte(33, 0)
-    await read_byte(44, 0)
-    await read_byte(55, 0)
-    await read_byte(66, 1)
+    await read_byte(0xFD, 0)
+    await read_byte(0xBE, 0)
+    await read_byte(0xAC, 0)
+    await read_byte(0x97, 0)
+    await read_byte(0x86, 0)
+    await read_byte(0xB5, 1)
     await read_byte(0, 1)
 
     await write_reset()
@@ -253,21 +253,21 @@ async def test_project(dut):
     await write_reset()
 
     # write to byte buffer
-    await write_byte(11, 0)
-    await write_byte(22, 0)
-    await write_byte(33, 0)
+    await write_byte(0xFD, 0)
+    await write_byte(0xBE, 0)
+    await write_byte(0xAC, 0)
 
     # read from byte buffer
-    await read_byte(11, 0)
-    await read_byte(22, 0)
-    await read_byte(33, 1)
+    await read_byte(0xFD, 0)
+    await read_byte(0xBE, 0)
+    await read_byte(0xAC, 1)
     await read_byte(0, 1)
 
     # read from byte buffer again
     await read_reset()
-    await read_byte(11, 0)
-    await read_byte(22, 0)
-    await read_byte(33, 1)
+    await read_byte(0xFD, 0)
+    await read_byte(0xBE, 0)
+    await read_byte(0xAC, 1)
     await read_byte(0, 1)
 
     await write_reset()
