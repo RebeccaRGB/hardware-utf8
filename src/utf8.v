@@ -24,7 +24,8 @@ module hardware_utf8 (
 	output wire private,     // character is in a private use area
 	output wire nonchar,     // character is a non-character
 	input  wire rst_in,      // reset input (clears all registers)
-	input  wire rst_out      // reset output (clears only read positions)
+	input  wire rst_out,     // reset output (clears only read positions)
+	input  wire clk
 );
 
 	reg [31:0] rc; // character register
@@ -533,9 +534,7 @@ module hardware_utf8 (
 		if (rbop < 6) rbop <= rbop + 1;
 	end endtask
 
-	wire something_dumb = rst_in & rst_out & cin & bin & cout & bout;
-
-	always @(negedge something_dumb) begin
+	always @(posedge clk) begin
 		if (~rst_in) reset_all;
 		else if (~rst_out) reset_read;
 		else if (~cin) write_rc_encode_utf8;

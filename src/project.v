@@ -53,7 +53,7 @@ module tt_um_rebeccargb_hardware_utf8 (
     bin, bout, bin_eof, bout_eof,
     ready, retry, invalid, overlong, nonuni, error,
     normal, control, surrogate, highchar, private, nonchar,
-    rst_in, rst_out
+    rst_in, rst_out, clk
   );
 
   // List all unused inputs to prevent warnings
