@@ -23,7 +23,7 @@ async def test_project(dut):
     await ClockCycles(dut.clk, 10)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 10)
-    assert dut.uo_out.value == 0x80
+    assert dut.uo_out.value == 0xC0
     assert dut.uio_out.value == 0
 
     dut._log.info("Test project behavior")
@@ -46,16 +46,16 @@ async def test_project(dut):
     def get_output(b):
         return (dut.uo_out.value >> b) & 1
 
-    READ = 0 # read/write mode
+    OUTR = 0 # output reset
     ERRS = 1 # errors/properties output
     CHKR = 2 # range check
     IOBE = 3 # big endian I/O
-    CCLK = 4 # character I/O clock
-    BCLK = 5 # byte I/O clock
+    READ = 4 # read/write mode
+    CCLK = 5 # character I/O clock
     UCLK = 6 # UTF-16 I/O clock
-    OUTR = 7 # output reset
+    BCLK = 7 # byte I/O clock
 
-    CEOF = 6 # character EOF
+    UEOF = 6 # UTF-16 EOF
     BEOF = 7 # byte EOF
 
     async def write_byte(b, eof):
@@ -72,18 +72,16 @@ async def test_project(dut):
         assert get_output(BEOF) == eof
         assert dut.uio_out.value == b
 
-    async def write_char(b, eof):
+    async def write_char(b):
         dut.uio_in.value = b;
         await clear_input(READ) # write mode
         await clear_input(CCLK) # char input clock down
         await set_input(CCLK) # char input clock up
-        assert get_output(CEOF) == eof
 
-    async def read_char(b, eof):
+    async def read_char(b):
         await set_input(READ) # read mode
         await clear_input(CCLK) # char output clock down
         await set_input(CCLK) # char output clock up
-        assert get_output(CEOF) == eof
         assert dut.uio_out.value == b
 
     async def read_reset():
@@ -96,7 +94,7 @@ async def test_project(dut):
         await ClockCycles(dut.clk, 1)
         dut.rst_n.value = 1
         await ClockCycles(dut.clk, 1)
-        assert dut.uo_out.value == (0x80 if (ui_in & 0x01) else 0)
+        assert dut.uo_out.value == (0xC0 if (ui_in & 0x10) else 0)
         assert dut.uio_out.value == 0
 
     async def write_cp(cp):
@@ -104,19 +102,15 @@ async def test_project(dut):
         dut.uio_in.value = (cp >> 24) & 0xFF
         await clear_input(CCLK) # char input clock down
         await set_input(CCLK) # char input clock up
-        assert get_output(CEOF) == 0
         dut.uio_in.value = (cp >> 16) & 0xFF
         await clear_input(CCLK) # char input clock down
         await set_input(CCLK) # char input clock up
-        assert get_output(CEOF) == 0
         dut.uio_in.value = (cp >> 8) & 0xFF
         await clear_input(CCLK) # char input clock down
         await set_input(CCLK) # char input clock up
-        assert get_output(CEOF) == 0
         dut.uio_in.value = cp & 0xFF
         await clear_input(CCLK) # char input clock down
         await set_input(CCLK) # char input clock up
-        assert get_output(CEOF) == 1
 
     async def read_bytes(*args):
         await set_input(READ) # read mode
@@ -143,19 +137,15 @@ async def test_project(dut):
         await clear_input(CCLK) # char output clock down
         await set_input(CCLK) # char output clock up
         assert dut.uio_out.value == (cp >> 24) & 0xFF
-        assert get_output(CEOF) == 0
         await clear_input(CCLK) # char output clock down
         await set_input(CCLK) # char output clock up
         assert dut.uio_out.value == (cp >> 16) & 0xFF
-        assert get_output(CEOF) == 0
         await clear_input(CCLK) # char output clock down
         await set_input(CCLK) # char output clock up
         assert dut.uio_out.value == (cp >> 8) & 0xFF
-        assert get_output(CEOF) == 0
         await clear_input(CCLK) # char output clock down
         await set_input(CCLK) # char output clock up
         assert dut.uio_out.value == cp & 0xFF
-        assert get_output(CEOF) == 1
 
     async def write_utf16(*args):
         await clear_input(READ) # write mode
@@ -167,12 +157,15 @@ async def test_project(dut):
     async def read_utf16(*args):
         await set_input(READ) # read mode
         for b in args:
+            assert get_output(UEOF) == 0
             await clear_input(UCLK) # UTF-16 output clock down
             await set_input(UCLK) # UTF-16 output clock up
             assert dut.uio_out.value == b
+        assert get_output(UEOF) == 1
         await clear_input(UCLK) # UTF-16 output clock down
         await set_input(UCLK) # UTF-16 output clock up
         assert dut.uio_out.value == 0
+        assert get_output(UEOF) == 1
 
     UNDERFLOW = 0x00
     READY     = 0x01
@@ -234,51 +227,51 @@ async def test_project(dut):
     await write_reset()
 
     # write to character buffer, big endian
-    await write_char(11, 0)
-    await write_char(22, 0)
-    await write_char(33, 0)
-    await write_char(44, 1)
-    await write_char(55, 1)
+    await write_char(11)
+    await write_char(22)
+    await write_char(33)
+    await write_char(44)
+    await write_char(55)
 
     # read from character buffer, big endian
-    await read_char(11, 0)
-    await read_char(22, 0)
-    await read_char(33, 0)
-    await read_char(44, 1)
-    await read_char(0, 1)
+    await read_char(11)
+    await read_char(22)
+    await read_char(33)
+    await read_char(44)
+    await read_char(0)
 
     # read from character buffer again
     await read_reset()
-    await read_char(11, 0)
-    await read_char(22, 0)
-    await read_char(33, 0)
-    await read_char(44, 1)
-    await read_char(0, 1)
+    await read_char(11)
+    await read_char(22)
+    await read_char(33)
+    await read_char(44)
+    await read_char(0)
 
     await clear_input(IOBE)
     await write_reset()
 
     # write to character buffer, little endian
-    await write_char(11, 0)
-    await write_char(22, 0)
-    await write_char(33, 0)
-    await write_char(44, 1)
-    await write_char(55, 1)
+    await write_char(11)
+    await write_char(22)
+    await write_char(33)
+    await write_char(44)
+    await write_char(55)
 
     # read from character buffer, little endian
-    await read_char(11, 0)
-    await read_char(22, 0)
-    await read_char(33, 0)
-    await read_char(44, 1)
-    await read_char(0, 1)
+    await read_char(11)
+    await read_char(22)
+    await read_char(33)
+    await read_char(44)
+    await read_char(0)
 
     # read from character buffer again
     await read_reset()
-    await read_char(11, 0)
-    await read_char(22, 0)
-    await read_char(33, 0)
-    await read_char(44, 1)
-    await read_char(0, 1)
+    await read_char(11)
+    await read_char(22)
+    await read_char(33)
+    await read_char(44)
+    await read_char(0)
 
     await set_input(IOBE)
     await write_reset()
@@ -304,45 +297,45 @@ async def test_project(dut):
     await write_reset()
 
     # write to character buffer, big endian
-    await write_char(111, 0)
-    await write_char(222, 0)
+    await write_char(111)
+    await write_char(222)
 
     # read from character buffer, big endian
-    await read_char(0, 0)
-    await read_char(0, 0)
-    await read_char(111, 0)
-    await read_char(222, 1)
-    await read_char(0, 1)
+    await read_char(0)
+    await read_char(0)
+    await read_char(111)
+    await read_char(222)
+    await read_char(0)
 
     # read from character buffer again
     await read_reset()
-    await read_char(0, 0)
-    await read_char(0, 0)
-    await read_char(111, 0)
-    await read_char(222, 1)
-    await read_char(0, 1)
+    await read_char(0)
+    await read_char(0)
+    await read_char(111)
+    await read_char(222)
+    await read_char(0)
 
     await clear_input(IOBE)
     await write_reset()
 
     # write to character buffer, little endian
-    await write_char(111, 0)
-    await write_char(222, 0)
+    await write_char(111)
+    await write_char(222)
 
     # read from character buffer, little endian
-    await read_char(111, 0)
-    await read_char(222, 0)
-    await read_char(0, 0)
-    await read_char(0, 1)
-    await read_char(0, 1)
+    await read_char(111)
+    await read_char(222)
+    await read_char(0)
+    await read_char(0)
+    await read_char(0)
 
     # read from character buffer again
     await read_reset()
-    await read_char(111, 0)
-    await read_char(222, 0)
-    await read_char(0, 0)
-    await read_char(0, 1)
-    await read_char(0, 1)
+    await read_char(111)
+    await read_char(222)
+    await read_char(0)
+    await read_char(0)
+    await read_char(0)
 
     await set_input(IOBE)
     await write_reset()

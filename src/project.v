@@ -16,23 +16,20 @@ module tt_um_rebeccargb_hardware_utf8 (
     input  wire       rst_n     // reset_n - low to reset
 );
 
-  // multiplexing signals
-  wire read = ui_in[0]; // HIGH to read, LOW to write
-  wire errs = ui_in[1]; // HIGH for errors, LOW for character properties
-
-  assign uio_oe = {8{read}};
-
   // inputs
-  wire chk_range = ui_in[2];
-  wire cbe       = ui_in[3];
-  wire cin       = (read ? 1 : ui_in[4]);
-  wire cout      = (read ? ui_in[4] : 1);
-  wire bin       = (read ? 1 : ui_in[5]);
-  wire bout      = (read ? ui_in[5] : 1);
-  wire uin       = (read ? 1 : ui_in[6]);
-  wire uout      = (read ? ui_in[6] : 1);
-  wire rst_out   = ui_in[7];
-  wire rst_in    = rst_n;
+  wire rst_in    = rst_n;    // reset input, active low
+  wire rst_out   = ui_in[0]; // reset output, active low
+  wire errs      = ui_in[1]; // HIGH for errors, LOW for character properties
+  wire chk_range = ui_in[2]; // HIGH to signal error on value ≥0x110000
+  wire cbe       = ui_in[3]; // HIGH for big endian, LOW for little endian
+  wire read      = ui_in[4]; // HIGH to read, LOW to write
+  wire cin       = (read ? 1 : ui_in[5]); // character input
+  wire cout      = (read ? ui_in[5] : 1); // character output
+  wire uin       = (read ? 1 : ui_in[6]); // UTF-16 input
+  wire uout      = (read ? ui_in[6] : 1); // UTF-16 output
+  wire bin       = (read ? 1 : ui_in[7]); // UTF-8 input
+  wire bout      = (read ? ui_in[7] : 1); // UTF-8 output
+  assign uio_oe  = {8{read}};
 
   // outputs
   wire cin_eof, cout_eof;
@@ -47,7 +44,7 @@ module tt_um_rebeccargb_hardware_utf8 (
   assign uo_out[3] = (errs ? overlong : highchar );
   assign uo_out[4] = (errs ? nonuni   : private  );
   assign uo_out[5] = (errs ? error    : nonchar  );
-  assign uo_out[6] = (read ? cout_eof : cin_eof  );
+  assign uo_out[6] = (read ? uout_eof : uin_eof  );
   assign uo_out[7] = (read ? bout_eof : bin_eof  );
 
   hardware_utf8 u8(
@@ -61,6 +58,6 @@ module tt_um_rebeccargb_hardware_utf8 (
   );
 
   // List all unused inputs to prevent warnings
-  wire _unused = &{ena, clk, rst_n, 1'b0};
+  wire _unused = &{ena, cout_eof, cin_eof, 1'b0};
 
 endmodule

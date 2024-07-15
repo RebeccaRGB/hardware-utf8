@@ -1,9 +1,9 @@
 # Tiny Tapeout project information
 project:
-  title:        "Hardware UTF-8 Encoder/Decoder"                                          # Project title
+  title:        "Hardware UTF Encoder/Decoder"                                            # Project title
   author:       "Rebecca G. Bettencourt"                                                  # Your name
   discord:      "YoukaiRempeka"                                                           # Your discord username, for communication and automatically assigning you a Tapeout role (optional)
-  description:  "Converts Unicode code points to UTF-8 byte strings and vice versa."      # One line description of what your project does
+  description:  "Converts Unicode code points between UTF-8, UTF-16, and UTF-32."         # One line description of what your project does
   language:     "Verilog"                                                                 # other examples include SystemVerilog, Amaranth, VHDL, etc
   clock_hz:     0                                                                         # Clock frequency in Hz (or 0 if not applicable)
 
@@ -23,14 +23,14 @@ project:
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 pinout:
   # Inputs
-  ui[0]: "READ, /WRITE: select I/O direction"
-  ui[1]: "ERRS, /PROPS: select multiplexed status output"
+  ui[0]: "/ROUT: reset output state for multiple reads, active low"
+  ui[1]: "ERRS, /PROPS: select status output"
   ui[2]: "CHK: treat non-Unicode values (≥0x110000) as errors"
   ui[3]: "CBE, /CLE: character I/O is big-endian"
-  ui[4]: "/CIO: character I/O strobe, active low"
-  ui[5]: "/BIO: UTF-8 byte I/O strobe, active low"
+  ui[4]: "READ, /WRITE: select I/O direction"
+  ui[5]: "/CIO: character I/O strobe, active low"
   ui[6]: "/UIO: UTF-16 byte I/O strobe, active low"
-  ui[7]: "/ROUT: reset output state for multiple reads, active low"
+  ui[7]: "/BIO: UTF-8 byte I/O strobe, active low"
 
   # Outputs
   uo[0]: "output ready; normal character"
@@ -39,8 +39,8 @@ pinout:
   uo[3]: "overlong encoding; high surrogate or non-BMP character"
   uo[4]: "non-Unicode value; private use character"
   uo[5]: "error; non-character"
-  uo[6]: "character I/O EOF"
-  uo[7]: "byte I/O EOF"
+  uo[6]: "UEOF: UTF-16 byte I/O EOF"
+  uo[7]: "BEOF: UTF-8 byte I/O EOF"
 
   # Bidirectional pins
   uio[0]: "I/O LSB"
