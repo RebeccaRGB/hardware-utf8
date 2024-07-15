@@ -28,9 +28,9 @@ pinout:
   ui[2]: "CHK: treat non-Unicode values (≥0x110000) as errors"
   ui[3]: "CBE, /CLE: character I/O is big-endian"
   ui[4]: "/CIO: character I/O strobe, active low"
-  ui[5]: "/BIO: byte I/O strobe, active low"
-  ui[6]: "/ROUT: reset output state for multiple reads, active low"
-  ui[7]: "/RESET: reset all state, active low"
+  ui[5]: "/BIO: UTF-8 byte I/O strobe, active low"
+  ui[6]: "/UIO: UTF-16 byte I/O strobe, active low"
+  ui[7]: "/ROUT: reset output state for multiple reads, active low"
 
   # Outputs
   uo[0]: "output ready; normal character"

@@ -29,12 +29,15 @@ module tt_um_rebeccargb_hardware_utf8 (
   wire cout      = (read ? ui_in[4] : 1);
   wire bin       = (read ? 1 : ui_in[5]);
   wire bout      = (read ? ui_in[5] : 1);
-  wire rst_out   = ui_in[6];
-  wire rst_in    = ui_in[7] & rst_n;
+  wire uin       = (read ? 1 : ui_in[6]);
+  wire uout      = (read ? ui_in[6] : 1);
+  wire rst_out   = ui_in[7];
+  wire rst_in    = rst_n;
 
   // outputs
   wire cin_eof, cout_eof;
   wire bin_eof, bout_eof;
+  wire uin_eof, uout_eof;
   wire ready, retry, invalid, overlong, nonuni, error;
   wire normal, control, surrogate, highchar, private, nonchar;
 
@@ -51,6 +54,7 @@ module tt_um_rebeccargb_hardware_utf8 (
     uio_in, uio_out, chk_range, cbe,
     cin, cout, cin_eof, cout_eof,
     bin, bout, bin_eof, bout_eof,
+    uin, uout, uin_eof, uout_eof,
     ready, retry, invalid, overlong, nonuni, error,
     normal, control, surrogate, highchar, private, nonchar,
     rst_in, rst_out, clk
