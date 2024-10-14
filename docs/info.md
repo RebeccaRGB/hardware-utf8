@@ -114,7 +114,7 @@ If all of these outputs are LOW, there is no valid code point in the output.
 
 ## How to test
 
-The `test.py` file covers a comprehensive set of test cases which are listed in [a separate file](test_cases.md) to avoid bloating the TT08 manual.
+The `test.py` file covers a comprehensive set of test cases which are listed in [a separate file](https://github.com/RebeccaRGB/hardware-utf8/blob/main/docs/test_cases.md) to avoid bloating the TT09 manual.
 
 ## External hardware
 
