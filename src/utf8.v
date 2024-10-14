@@ -174,14 +174,17 @@ module hardware_utf8 (
 
 	task read_utf32; begin
 		// read 8 bits from character register
-		case (rcop)
-			0: dout <= cbe ? rc[31:24] : rc[7:0];
-			1: dout <= cbe ? rc[23:16] : rc[15:8];
-			2: dout <= cbe ? rc[15:8] : rc[23:16];
-			3: dout <= cbe ? rc[7:0] : rc[31:24];
-			default: dout <= 0;
-		endcase
-		if (rcop < 4) rcop <= rcop + 1;
+		if (rcop >= 4) begin
+			dout <= 0;
+		end else begin
+			case (rcop)
+				0: dout <= cbe ? rc[31:24] : rc[7:0];
+				1: dout <= cbe ? rc[23:16] : rc[15:8];
+				2: dout <= cbe ? rc[15:8] : rc[23:16];
+				3: dout <= cbe ? rc[7:0] : rc[31:24];
+			endcase
+			rcop <= rcop + 1;
+		end
 	end endtask
 
 	task write_utf8; begin
