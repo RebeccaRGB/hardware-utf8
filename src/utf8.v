@@ -156,7 +156,7 @@ module hardware_utf8 (
 
 	task write_utf32; begin
 		// write 8 bits to character register
-		if (empty) begin
+		if (rcip == 0) begin
 			empty <= 0;
 			rc <= {24'b0, din};
 			rcip <= 1;
@@ -189,7 +189,7 @@ module hardware_utf8 (
 
 	task write_utf8; begin
 		// write UTF-8 byte to character register
-		if (empty) begin
+		if (rbip == 0) begin
 			empty <= 0;
 			rc <= {{24{din[7]}}, din};
 		end else if (ready || (din[7:6] != 2'b10)) begin
@@ -236,9 +236,11 @@ module hardware_utf8 (
 
 	task write_utf16; begin
 		// write UTF-16 byte to character register
-		if (empty) begin
+		if (ruip == 0) begin
 			empty <= 0;
 			rc <= {24'hDDDDDD, din};
+		end else if (ruip >= 4) begin
+			retry <= 1;
 		end else begin
 			case (ruip)
 				// 1-byte truncated UTF-16 input
@@ -259,8 +261,6 @@ module hardware_utf8 (
 					rc <= {16'b0, rc[23:8]};
 					retry <= 1;
 				end
-				// 4-byte UTF-16 input
-				default: retry <= 1;
 			endcase
 		end
 	end endtask
