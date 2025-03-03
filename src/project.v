@@ -58,6 +58,6 @@ module tt_um_rebeccargb_hardware_utf8 (
   );
 
   // List all unused inputs to prevent warnings
-  wire _unused_ok = &{ena, cout_eof, cin_eof};
+  wire _unused = &{ena, cout_eof, cin_eof, 1'b0};
 
 endmodule
